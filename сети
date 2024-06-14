@@ -1,0 +1,696 @@
+# Сети и системы передачи информации
+
+enp0s3 = ens18
+
+enp0s8 = ens19
+
+enp0s9 = ens20
+
+enp0s10 = ens21
+
+![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/e1cbc4ea-c18f-45d7-b5b3-41578af3f151/Untitled.png)
+
+nftables - isp, rtr-l, rtr-r
+
+ip_forward - isp, rtr-l, rtr-r
+
+docker-io, docker-compose - web-l
+
+bind bind-utils - web-r, srv-l
+
+- *1 начать необходимо с настройки ip - адресов*
+    - ISP
+        1. hostnamectl set-hostname isp; exec bash
+        2. nano /etc/net/sysctl.conf 
+            1. net.ipv4.ip_forward = 1
+        3. cd /etc/net/ifaces
+        4. cp -r enp0s3/ enp0s8
+        5. cp -r enp0s3/ enp0s9
+        6. cp -r enp0s3/ enp0s10
+        7. vim enp0s8/options
+            1. BOOTPROTO=static
+        8. vim enp0s8/ipv4address
+            1. 100.100.100.1/28
+        9. vim enp0s8/ipv4route
+            1. 10.10.10.0/24 via 100.100.100.10
+        10. vim enp0s9/options
+            1. BOOTPROTO=static
+        11. vim enp0s9/ipv4address
+            1. 150.150.150.1/28
+        12. vim enp0s9/ipv4route
+            1. 20.20.20.0/24 via 150.150.150.10
+        13. vim enp0s10/options
+            1. BOOTPROTO=static
+        14. vim enp0s10/ipv4address
+            1. 35.35.35.1/28
+        15. systemctl restart network
+        16. reboot
+        17. apt-get update && apt-gt install chrony nftables -y
+    - CLI
+        1. hostnamectl set-hostname cli; exec bash
+        2. Пишем “ip a” и “ls /etc/net/ifaces/” проверяем, что для интерфейса ens19 есть директория /etc/net/ifaces/ens19, если нет, то “cp -r /etc/net/ifaces/ens18 /etc/net/ifaces/ens19”
+        3. vim /etc/net/ifaces/enp0s3/options
+            1. BOOTPROTO=static
+        4. vim /etc/net/ifaces/enp0s3/ipv4address
+            1. 35.35.35.10/28
+        5. vim /etc/net/ifaces/enp0s3/ipv4route
+            1. default via 35.35.35.1 (ip адрес isp)
+        6. systemctl restart network
+        7. reboot
+        8. apt-get update
+    - RTR-L
+        1. hostnamectl set-hostname rtr-l; exec bash
+        2. vim /etc/net/sysctl.conf 
+            1. net.ipv4.ip_forward = 1
+        3. cd /etc/net/ifaces
+        4. vim enp0s3/options
+            1. BOOTPROTO=static
+        5. vim enp0s3/ipv4address
+            1. 100.100.100.10/28
+        6. cp -r enp0s3 enp0s8
+        7. vim enp0s3/ipv4route
+            1. default via 100.100.100.1 (ip адрес isp)
+        8. vim enp0s8/ipv4address
+            1. 10.10.10.1/24
+        9. systemctl restart network
+        10. reboot
+        11. apt-get update
+    - RTR-R
+        1. hostnamectl set-hostname rtr-r; exec bash
+        2. vim /etc/net/sysctl.conf 
+            1. net.ipv4.ip_forward = 1
+        3. cd /etc/net/ifaces
+        4. vim enp0s3/options
+            1. BOOTPROTO=static
+        5. vim enp0s3/ipv4address
+            1. 150.150.150.10/28
+        6. cp -r enp0s3 enp0s8
+        7. vim enp0s3/ipv4route
+            1. default via 150.150.150.1 (ip адрес isp)
+        8. vim enp0s8/ipv4address
+            1. 20.20.20.1/24
+        9. systemctl restart network
+        10. reboot
+        11. apt-get update
+    - WEB-L
+        1. hostnamectl set-hostname web-l; exec bash
+        2. vim /etc/net/ifaces/enp0s3/options
+            1. BOOTPROTO=static
+        3. vim /etc/net/ifaces/enp0s3/ipv4address
+            1. 10.10.10.110/24
+        4. vim /etc/net/ifaces/enp0s3/ipv4route
+            1. default via 10.10.10.1
+        5. systemctl restart network
+        6. reboot
+        7. apt-get update
+    - WEB-R
+        1. hostnamectl set-hostname web-r; exec bash
+        2. vim /etc/net/ifaces/enp0s3/options
+            1. BOOTPROTO=static
+        3. vim /etc/net/ifaces/enp0s3/ipv4address
+            1. 20.20.20.100/24
+        4. vim /etc/net/ifaces/enp0s3/ipv4route
+            1. default via 20.20.20.1
+        5. systemctl restart network
+        6. reboot
+        7. apt-get update …
+    - SRV-L
+        1. hostnamectl set-hostname srv-l; exec bash
+        2. vim /etc/net/ifaces/enp0s3/options
+            1. BOOTPROTO=static
+        3. vim /etc/net/ifaces/enp0s3/ipv4address
+            1. 10.10.10.100/24
+        4. vim /etc/net/ifaces/enp0s3/ipv4route
+            1. default via 10.10.10.1
+        5. systemctl restart network
+        6. reboot
+        7. apt-get update && apt-get install chrony bind bind-utils
+- *2 Настройка динамической трансляции адресов на всех роутерах*
+    
+    начать выполение с isp
+    
+    - ISP
+        1. vim /etc/nftables/nftables.nft
+            1. в начало:
+            flush ruleset
+            2. в конец:
+            table ip nat {
+              chain postrouting {
+                 type nat hook postrouting priority 0;
+                 oifname enp0s3 (интерфейс в сторону интернета) masquerade
+              }
+            }
+            3. Вот так:
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/0e39afc0-ff39-4bc1-8bf2-ec10f1df8a65/Untitled.png)
+                
+        2. systemctl enable --now nftables
+        3. nft -f /etc/nftables/nftables.nft
+        4. nft list ruleset
+    - RTR-L
+        1. Если “ping 8.8.8.8” идет, а “ping ya.ru” не идет, то в 
+        /etc/resolv.conf записываем в начало nameserver 94.232.137.104 (ip адрес DNS пересылки сервера указанный в 5 пункте задания)
+        2. apt-get update && apt-get install nftables strongswan -y
+        3. vim /etc/nftables/nftables.nft
+            1. в начало:
+            flush ruleset
+            2. в конец:
+            table ip nat {
+              chain postrouting {
+                 type nat hook postrouting priority 0;
+                 ip saddr 10.10.10.0/24 oifname enp0s3 (интерфейс в сторону isp) masquerade;
+              }
+              chain prerouting {
+                 type nat hook prerouting priority 0;
+                 tcp dport 2024 dnat to 10.10.10.110:2024;
+                 udp dport 53 dnat to 10.10.10.100:53;
+              }
+            }
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/11f6f482-ffb3-438c-af33-8533dd049792/Untitled.png)
+                
+        4. systemctl enable --now nftables
+        5. nft -f /etc/nftables/nftables.nft
+    - RTR-R
+        1. Если “ping 8.8.8.8” идет, а “ping ya.ru” не идет, то в 
+        /etc/resolv.conf записываем в начало nameserver 94.232.137.104 (ip адрес DNS пересылки сервера указанный в 5 пункте задания)
+        2. apt-get update && apt-get install nftables -y
+        3. vim /etc/nftables/nftables.nft
+            1. в начало:
+            flush ruleset
+            2. в конец:
+            table ip nat {
+              chain postrouting {
+                 type nat hook postrouting priority 0;
+                 ip saddr 20.20.20.0/24 oifname enp0s3 (интерфейс в сторону isp) masquerade;
+              }
+              chain prerouting {
+                 type nat hook prerouting priority 0;
+                 tcp dport 2024 dnat to 20.20.20.100:2024;
+                 udp dport 53 dnat to 20.20.20.100:53;
+              }
+            }
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/2fb3f30b-eda0-4572-90ac-a303a2fd1670/Untitled.png)
+                
+        4. systemctl enable --now nftables
+        5. nft -f /etc/nftables/nftables.nft
+- *3 Между офисами должен быть установлен защищенный туннель, позволяющий
+осуществлять связь между регионами с применением внутренних адресов*
+    - RTR-L
+        1. vim /etc/gre.up
+            1. #!/bin/bash
+            ip tunnel add tun0 mode gre local 100.100.100.10 remote 150.150.150.10
+            ip addr add 10.5.5.1/30 dev tun0
+            ip link set up tun0
+            ip route add 20.20.20.0/24  via 10.5.5.2
+        2. chmod +x /etc/gre.up
+        3. /etc/gre.up
+        4. vim /etc/crontab
+            1. в конец добавляем:
+            @reboot root /etc/gre.up
+        5. vim /etc/strongswan/ipsec.conf
+            
+            conn vpn
+                    auto=start
+                    type=tunnel
+                    authby=secret
+                    left=100.100.100.10
+                    right=150.150.150.10
+                    leftsubnet=0.0.0.0/0
+                    rightsubnet=0.0.0.0/0
+                    leftprotoport=gre
+                    rightprotoport=gre
+                    ike=aes128-sha256-modp3072
+                    esp=aes128-sha256
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/729f5217-82d9-418a-ab03-87b020689557/Untitled.png)
+            
+        6. vim /etc/strongswan/ipsec.secrets
+            1. 100.100.100.10 150.150.150.10 : PSK “P@ssw0rd”
+        7. systemctl enable --now ipsec.service
+    - RTR-R
+        1. vim /etc/gre.up
+            1. #!/bin/bash
+            ip tunnel add tun0 mode gre local 150.150.150.10 remote 100.100.100.10
+            ip addr add 10.5.5.2/30 dev tun0
+            ip link set up tun0
+            ip route add 10.10.10.0/24  via 10.5.5.1
+        2. chmod +x /etc/gre.up
+        3. /etc/gre.up
+        4. vim /etc/crontab
+            1. в конец добавляем:
+            @reboot root /etc/gre.up
+        5. apt-get install strongswan
+        6. vim /etc/strongswan/ipsec.conf
+        conn vpn
+                auto=start
+                type=tunnel
+                authby=secret
+                left=150.150.150.10
+                right=100.100.100.10
+                leftsubnet=0.0.0.0/0
+                rightsubnet=0.0.0.0/0
+                leftprotoport=gre
+                rightprotoport=gre
+                ike=aes128-sha256-modp3072
+                esp=aes128-sha256
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/8757c365-2124-4360-a284-f7acd6d3c8a1/Untitled.png)
+        
+        1. vim /etc/strongswan/ipsec.secrets
+            1. 100.100.100.10 150.150.150.10 : PSK “P@ssw0rd”
+        2. systemctl enable --now ipsec.service
+    
+    После того, как на обоих RTR все прописали, проверяем на любом из них ipsec status, если есть 1 up, то все норм, если нет, то пробуем ipsec update и ipsec restart.
+    
+- *4 Настройка безопасного удаленного доступа (ssh) на серверах WEB-L и WEB-R*
+    - WEB-L
+        1. vim /etc/openssh/banner.txt
+            1. Authorized access only
+        2. vim /etc/openssh/sshd_config
+            1. расскоментируем строчку Port 22
+            пишем вместо 22 тот порт, который указан в задании (2024)
+            2. расскоментируем строчку MaxAuthTries 6
+            пишем вместо 6 столько попыток, сколько указано в задании (2)
+            3. расскоментируем строчку Banner none
+            вместо none пишем путь к banner.txt (/etc/openssh/banner.txt)
+            4. добавляем в конец AllowUsers sshuser
+        3. adduser sshuser
+        4. passwd sshuser
+            1. P@ssw0rd
+        5. systemctl restart sshd
+    - WEB-R
+        1. vim /etc/openssh/banner.txt
+            1. Authorized access only
+        2. vim /etc/openssh/sshd_config
+            1. расскоментируем строчку Port 22
+            пишем вместо 22 тот порт, который указан в задании (2024)
+            2. расскоментируем строчку MaxAuthTries 6
+            пишем вместо 6 столько попыток, сколько указано в задании (2)
+            3. расскоментируем строчку Banner none
+            вместо none пишем путь к banner.txt (/etc/openssh/banner.txt)
+            4. добавляем в конец AllowUsers sshuser
+        3. adduser sshuser
+        4. passwd sshuser
+            1. P@ssw0rd
+        5. systemctl restart sshd
+- *5 Настройка DNS для офисов HQ и BR*
+    - **SRV-L**
+        1. apt-get update && apt-get install bind bind-utils -y
+        2. systemctl enable --now bind
+        3. vim /etc/bind/options.conf
+            1. сюда запихиваем вот это, остальное в options убираем
+            listen-on { any; };
+            forwarders { 94.232.137.104; }; (ip адрес DNS в задании)
+            dnssec-validation no;
+            recursion yes;
+            allow-query { any; };
+            allow-recursion { any; };
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/d38e3107-8522-4c04-b233-a1bae77d3695/Untitled.png)
+            
+        4. vim /etc/bind/local.conf
+            1. добавляем после слов Add other zones here:
+            zone "au.team" {
+                            type master;
+                            file "au.team";
+                            allow-transfer {20.20.20.100;};
+            };
+            zone "10.10.10.in-addr.arpa" {
+                            type master;
+                            file "left.reverse";
+                            allow-transfer {20.20.20.100;};
+            };
+            zone "20.20.20. in-addr.arpa" {
+                            type master;
+                            file "right.reverse";
+                            allow-transfer {20.20.20.100;};
+            };
+            zone "35.35.35. in-addr.arpa" {
+                            type master;
+                            file "cli.reverse";
+                            allow-transfer {20.20.20.100;};
+            };
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/45d24875-0f77-430f-a8e6-e9ae62e4ae40/Untitled.png)
+            
+        5. cd /etc/bind/zone/
+        6. cp localhost au.team
+        7. vim au.team
+            1. заменяем localhost. на au.team.  и root.localhost. на root.au.team.
+            2. пишем через табуляцию  зоны:
+                
+                ```yaml
+                @        IN     NS    au.team.
+                @        IN     A     10.10.10.100
+                isp      IN     A     100.100.100.1
+                rtr-l    IN     A     10.10.10.1
+                rtr-r    IN     A     20.20.20.1
+                web-l    IN     A     10.10.10.110
+                web-r    IN     A     10.10.10.100
+                cli      IN     A     35.35.35.10
+                dns      IN     CNAME srv-l
+                ntp      IN     CNAME isp
+                mediawiki       IN    CNAME    web-l
+                ```
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/4375d2ea-dbfb-48b9-a0d8-ee5bae31f940/Untitled.png)
+                
+        8. cp localhost right.reverse
+        9. vim right.reverse
+            1. заменяем localhost. на 20.20.20.in-addr.arpa. и root.localhost. на root.20.20.20.in-addr.arpa.
+            2. пишем через табуляцию  зоны:
+                
+                ```yaml
+                @        IN     NS    au.team.
+                @        IN     A    20.20.20.100
+                1        PTR    rtr-r.au.team.
+                100      PTR    web-r.au.team.
+                ```
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/6d350bcc-91bb-4621-a060-500a4eee14df/Untitled.png)
+                
+        10. cp right.reverse left.reverse
+        11. vim left.reverse
+            1. заменяем 20.20.20.in-addr.arpa. на 10.10.10.in-addr.arpa. и root.localhost. на root.10.10.10.in-addr.arpa.
+            2. пишем через табуляцию  зоны:
+                
+                ```yaml
+                @        IN     NS    au.team.
+                @        IN     A     10.10.10.100
+                1        PTR    rtr-l.au.team.
+                100      PTR    srv-l.au.team.
+                110      PTR    web-l.au.team.
+                ```
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/aec91968-64a3-49c1-8b0a-6bab5458b610/Untitled.png)
+                
+        12. cp right.reverse cli.reverse
+        13. vim cli.reverse
+            1. заменяем 10.10.10.in-addr.arpa. на 35.35.35.in-addr.arpa. и root.localhost. на root.35.35.35.in-addr.arpa.
+            2. пишем через табуляцию  зоны:
+                
+                ```yaml
+                @        IN     NS    au.team.
+                @        IN     A     35.35.35.10
+                1        PTR    rtr-l.au.team.
+                100      PTR    srv-l.au.team.
+                110      PTR    web-l.au.team.
+                ```
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/78a249cb-aebc-4e24-a08e-fbd9bcc0ac57/Untitled.png)
+                
+        14. chmod 777 au.team
+        15. chmod 777 right.reverse
+        16. chmod 777 left.reverse
+        17. chmod 777 cli.reverse
+        18. systemctl restart bind
+        19. echo  “nameserver 127.0.0.1” > /etc/net/ifaces/enp0s8/resolv.conf
+        20. vim /etc/resolv.conf
+            1. должен быть указан только один nameserver 127.0.0.1
+            2. если пропал интернет, добавляем nameserver 94.232.137.104 или nameserver 8.8.8.8
+    - **WEB-R**
+        1. apt-get update && apt-get install bind bind-utils -y
+        2. systemctl enable --now bind
+        3. vim /etc/bind/options.conf
+            1. что должно быть в options:
+            listen-on { any; };
+            forwarders { 10.10.10.100; };
+            dnssec-validation no;
+            recursion yes;
+            allow-query { any; };
+            allow-recursion { any; };
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/47c6e882-7695-4fbc-bead-987b0379b8ff/Untitled.png)
+            
+        4. vim /etc/bind/local.conf
+            1. добавляем после слов Add other zones here:
+            zone "au.team" {
+                            type slave;
+                            file "slave/au.team";
+                            masters {10.10.10.100;};
+            };
+            zone "10.10.10.in-addr.arpa" {
+                            type slave;
+                            file "slave/left.reverse";
+                            masters {10.10.10.100;};
+            };
+            zone "20.20.20. in-addr.arpa" {
+                            type slave;
+                            file "slave/right. reverse";
+                            masters {10.10.10.100;};
+            };
+            zone "35.35.35. in-addr.arpa" {
+                            type slave;
+                            file "slave/cli. reverse";
+                            masters {10.10.10.100;};
+            };
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/9ecbd49d-03f0-4d59-a7ce-66335cce1578/Untitled.png)
+                
+        5. chown named:named /var/lib/bind/zone/slave/
+        6. chown named:named /etc/bind/zone/slave/
+        7. systemctl restart bind
+        8. echo  “nameserver 127.0.0.1” > /etc/net/ifaces/enp0s3/resolv.conf
+        9. vim /etc/resolv.conf
+            1. должен быть указан только один nameserver 127.0.0.1
+            2. если пропал интернет, добавляем nameserver 94.232.137.104 или nameserver 8.8.8.8
+    
+    После того как DNS сервера настроены, надо указать на оставшихся машинах указать в качестве DNS сервера наши сервера.
+    
+    - CLI
+        1. echo  “nameserver 100.100.100.10” > /etc/net/ifaces/enp0s3/resolv.conf
+        2. vim /etc/resolv.conf
+            1. должен быть указан только один nameserver 100.100.100.10
+            2. если пропал интернет, добавляем nameserver 94.232.137.104 или nameserver 8.8.8.8
+    - ISP
+        1. echo  “nameserver 100.100.100.10” > /etc/net/ifaces/enp0s8/resolv.conf
+        2. vim /etc/resolv.conf
+            1. должен быть указан только один nameserver 100.100.100.10
+            2. если пропал интернет, добавляем nameserver 94.232.137.104 или nameserver 8.8.8.8
+    - RTR-L
+        1. echo  “nameserver 10.10.10.100” > /etc/net/ifaces/enp0s8/resolv.conf
+        2. vim /etc/resolv.conf
+            1. должен быть указан только один nameserver 10.10.10.100
+            2. если пропал интернет, добавляем nameserver 94.232.137.104 или nameserver 8.8.8.8
+    - RTR-R
+        1. echo  “nameserver 20.20.20.100” > /etc/net/ifaces/enp0s8/resolv.conf
+        2. vim /etc/resolv.conf
+            1. должен быть указан только один nameserver 20.20.20.100
+            2. если пропал интернет, добавляем nameserver 94.232.137.104 или nameserver 8.8.8.8
+    - WEB-L
+        1. echo  “nameserver 10.10.10.100” > /etc/net/ifaces/enp0s3/resolv.conf
+        2. vim /etc/resolv.conf
+            1. должен быть указан только один nameserver 10.10.10.100
+            2. если пропал интернет, добавляем nameserver 94.232.137.104 или nameserver 8.8.8.8
+- *6 Настройте службу сетевого времени на базе сервиса chrony*
+    - ISP
+        1. apt-get install chrony
+        2. vim /etc/chrony.conf
+            1. в конец пишем:
+            server 127.0.0.1
+            allow 100.100.100.0/28
+            allow 150.150.150.0/28
+            allow 35.35.35.0/28
+            allow 10.10.10.0/24
+            allow 20.20.20.0/24
+            local stratum 5
+        3. systemctl restart chronyd
+    - CLI
+        1. apt-get install chrony
+        2. vim /etc/chrony.conf
+            1. комментируем “pool pool.ntp.org iburst”
+            2. в конец пишем:
+            server 35.35.35.1 iburst
+        3. systemctl restart chronyd
+    - RTR-L
+        1. apt-get install chrony
+        2. vim /etc/chrony.conf
+            1. комментируем “pool pool.ntp.org iburst”
+            2. в конец пишем:
+            server 100.100.100.1 iburst
+        3. systemctl restart chronyd
+    - RTR-R
+        1. apt-get install chrony
+        2. vim /etc/chrony.conf
+            1. комментируем “pool pool.ntp.org iburst”
+            2. в конец пишем:
+            server 150.150.150.1 iburst
+        3. systemctl restart chronyd
+    - WEB-R
+        1. apt-get install chrony
+        2. vim /etc/chrony.conf
+            1. комментируем “pool pool.ntp.org iburst”
+            2. в конец пишем:
+            server 150.150.150.1 iburst
+        3. systemctl restart chronyd
+    - WEB-L
+        1. apt-get install chrony
+        2. vim /etc/chrony.conf
+            1. комментируем “pool pool.ntp.org iburst”
+            2. в конец пишем:
+            server 100.100.100.1 iburst
+        3. systemctl restart chronyd
+    - SRV-L
+        1. apt-get install chrony
+        2. vim /etc/chrony.conf
+            1. комментируем “pool pool.ntp.org iburst”
+            2. в конец пишем:
+            server 100.100.100.1 iburst
+        3. systemctl restart chronyd
+- *7 Сконфигурируйте файловое хранилище*
+    - SRV-L
+        1. apt-get install nfs-server
+        2. lsblk проверяем NAME 4 дисков размером 1G:
+        в моем случае 4 диска размером 1 гб это sdb sdc sdd sde
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/a18d396d-e13d-45f6-b2f9-5cff82f79076/Untitled.png)
+            
+        3. cfdisk /dev/sdb
+        4. 
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/1281f07e-1175-468d-9ee5-965430ce9eae/Untitled.png)
+            
+        5. Enter
+        6. 
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/da5ef20b-78bf-42f0-9323-8810b61e826d/Untitled.png)
+            
+        7. 
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/89a3c3aa-a7a7-4c52-82d7-901eaa362159/Untitled.png)
+            
+        8. 
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/084465a9-06a6-4221-9ee7-aca02d1579b8/Untitled.png)
+            
+        9. С пункта 3 повторить действия со всеми остальными дисками (sdb, sdc, sdd, sde)
+        10. mdadm --create /dev/md0 --level=5 --raid-devices=4 /dev/sdb1 /dev/sdc1 /dev/sdd1 /dev/sde1
+        11. mdadm --detail --scan --verbose | tee -a /etc/mdadm.conf
+        12. mkfs.ext4 /dev/md0
+        13. mkdir /raid5
+        14. vim /etc/fstab
+            1. добавить в конец, пишем через табуляцию, а не пробел:
+            /dev/md0 /raid5 ext4 defaults 0 0
+                
+                ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/8488858d-a35a-40bf-844a-8a9c3a7ce526/Untitled.png)
+                
+        15. reboot
+        16. mkdir /raid5/nfs
+        17. chmod 777 /raid5/nfs
+        18. vim /etc/exports
+            1. в конец добавляем:
+            /raid5/nfs 10.10.10.110(rw,sync) 20.20.20.100(rw,sync)
+            2. Пояснение:
+            10.10.10.110-адрес WEB-L
+            20.20.20.100-адрес WEB-R
+    - WEB-L
+        1. apt-get install nfs-client
+        2. mkdir /mnt/nfs
+        3. vim /etc/fstab
+            1. добавляем в конец, пишем через табуляцию
+            10.10.10.100:/raid5/nfs /mnt/nfs nfs rw,sync 0 0
+    - WEB-R
+        1. apt-get install nfs-client
+        2. mkdir /mnt/nfs
+        3. vim /etc/fstab
+            1. добавляем в конец, пишем через табуляцию
+            10.10.10.100:/raid5/nfs /mnt/nfs nfs rw,sync 0 0
+- *8 Запустите сервис MediaWiki используя docker на сервере WEB-L*
+    - WEB-L
+        1. apt-get install docker-io docker-compose -y
+        2. vim ~/wiki.yml
+            1. меняем так как надо по заданию
+            
+            ```yaml
+            version: '3'
+            services:
+              MediaWiki:
+                container_name: wiki
+                image: mediawiki
+                restart: always
+                ports:
+                  - 8080:80
+                links:
+                  - database
+                volumes:
+                  - images:/var/www/html/images
+                  # - ./LocalSettings.php:/var/www/html/LocalSettings.php
+            
+              database:
+                container_name: db
+                image: mysql
+                restart: always
+                environment:
+                  MYSQL_DATABASE: mediawiki
+                  MYSQL_USER: wiki
+                  MYSQL_PASSWORD: DEP@ssw0rd
+                  MYSQL_RANDOM_ROOT_PASSWORD: 'toor'
+                volumes:
+                  - dbvolume:/var/lib/mysql
+            
+            volumes:
+              images:
+              dbvolume:
+                external: true
+            ```
+            
+        3. docker volume create dbvolume
+        4. cd ~
+        5. docker-compose -f wiki.yml up -d 
+        6. заходим в mozila, пишем в строке url:
+        localhost:8080
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/c3fd4335-d9f0-4082-9814-7614b446a791/Untitled.png)
+            
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/5a230705-9923-43a3-a95d-4ddce2860a7e/Untitled.png)
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/4a12c243-9b28-401a-b027-d6ac44916a8a/Untitled.png)
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/50ebe77f-46b9-4a0f-a348-9a3c2f6486a1/Untitled.png)
+        
+        Выбираем MariaDB, MySQL или совместимая
+        
+        хост базы данных: db (по заданию)
+        
+        имя базы данных: mediawiki (по заданию)
+        
+        имя пользователя базы данных: wiki (по заданию)
+        
+        Пароль: DEP@ssw0rd (по заданию)
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/372bb088-c0ae-425a-85c4-864d9fb7d3ac/Untitled.png)
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/0d860fca-2bf2-4644-b3a2-0d6594468a9f/Untitled.png)
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/4d00ec96-2a99-4a6b-8a01-39d4a3a61f62/Untitled.png)
+        
+        1. Пароль: DEP@ssw0rd, можно без почты
+            
+            ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/d17f0dbd-5a40-43ba-8504-ae382dd8f78e/Untitled.png)
+            
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/693bc613-369f-473d-8ea6-1850beddd2fe/Untitled.png)
+        
+        ![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/1ef8204e-b935-461d-90ae-939800342698/d8ece436-7826-4307-8602-bbfde850469f/Untitled.png)
+        
+        cp /home/user/Загрузки/LocalSettings.php ~/LocalSettings.php
+        
+        vim ~/wiki.yml
+        
+        расскоментируем 
+        - ./LocalSettings.php:/var/www/html/LocalSettings.php
+        
+        docker-compose -f wiki.yml stop
+        
+        docker-compose -f wiki.yml up -d
+        
+- *9 Удобным способом установите приложение Яндекс Браузере для организаций на CLI*
+    - CLI
+        1. apt-get install yandex-browser -y
+        2. запустить НЕ от root с помощью команды:
+        yandex-browser-stable
+        запустить от root с помощью команды:
+        yandex-browser-stable --no-sandbox
